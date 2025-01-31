@@ -1,17 +1,25 @@
 {
-  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.6/.schema/devbox.schema.json",
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
   "packages": [
-    "docker@latest",
-    "colima@latest",
-    "go@1.23.1"
+    "go@1.23.4",
+    "docker@27.5.0",
+    "colima@0.8.1"
   ],
+  "env": {
+    "PATH": "$PATH:$PWD/bin:$HOME/go/bin",
+    "DOCKER_HOST": "unix://${HOME}/.colima/default/docker.sock",
+    "PROJECT_HOME": "$PWD"
+  },
   "shell": {
     "init_hook": [
-      "echo 'Welcome to devbox!' > /dev/null"
+      "echo 'Welcome to devbox!'"
     ],
     "scripts": {
       "test": [
-        "echo \"Error: no test specified\" && exit 1"
+        "make -B test"
+      ],
+      "app": [
+        "make run"
       ]
     }
   }

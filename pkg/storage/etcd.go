@@ -12,6 +12,10 @@ import (
 )
 
 func StartEmbeddedEtcd() (*embed.Etcd, int, error) {
+	return StartEmbeddedEtcdWithPort(0, 0)
+}
+
+func StartEmbeddedEtcdWithPort(peerPort, clientPort int) (*embed.Etcd, int, error) {
 	cfg := embed.NewConfig()
 	dir, err := createTempDir()
 	if err != nil {
@@ -20,19 +24,23 @@ func StartEmbeddedEtcd() (*embed.Etcd, int, error) {
 
 	cfg.Dir = dir
 
-	// Use a random available port
-	port, err := PickAvailableRandomPort()
-	if err != nil {
-		return nil, 0, err
+	if peerPort == 0 {
+		peerPort, err = PickAvailableRandomPort()
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
-	cfg.ListenPeerUrls = []url.URL{{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", port)}}
-	port, err = PickAvailableRandomPort()
-	if err != nil {
-		return nil, port, err
+	cfg.ListenPeerUrls = []url.URL{{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", peerPort)}}
+
+	if clientPort == 0 {
+		clientPort, err = PickAvailableRandomPort()
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
-	cfg.ListenClientUrls = []url.URL{{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", port)}}
+	cfg.ListenClientUrls = []url.URL{{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", clientPort)}}
 	cfg.Logger = "zap"
 	cfg.LogOutputs = []string{"stderr"}
 
@@ -43,13 +51,13 @@ func StartEmbeddedEtcd() (*embed.Etcd, int, error) {
 
 	select {
 	case <-e.Server.ReadyNotify():
-		fmt.Printf("Embedded etcd is ready on port %d!\n", port)
+		fmt.Printf("Embedded etcd is ready with peer port %d and client port %d!\n", peerPort, clientPort)
 	case <-time.After(10 * time.Second):
 		e.Server.Stop() // trigger a shutdown
 		return nil, 0, fmt.Errorf("server took too long to start")
 	}
 
-	return e, port, nil
+	return e, clientPort, nil
 }
 
 func PickAvailableRandomPort() (int, error) {

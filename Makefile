@@ -6,84 +6,102 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
-MAIN_PATH=./cmd/etcdtest
+GOINSTALL=$(GOCMD) install
 
 # Make parameters
-.PHONY: all build test clean run deps ci install-mockgen mockgen build/apiserver build/controller build/kubelet
+OUT_DIR=out
+BINARIES=apiserver controller kubelet
+BINARY_PATHS=$(addprefix $(OUT_DIR)/,$(BINARIES))
+EXECUTABLES=$(addprefix $(GOPATH)/,$(BINARIES))
 
-all: test build
+BUILD_TARGETS=$(addprefix build/,$(BINARIES))
+INSTALL_TARGETS=$(addprefix install/,$(BINARIES))
+GO_BIN_TARGETS=$(addprefix $(GOPATH)/bin/,$(BINARIES))
 
-build:
-	$(GOBUILD) -o $(BINARY_NAME) -v $(MAIN_PATH)
+# Colors
+CYAN_COLOR_START := \033[36m
+CYAN_COLOR_END := \033[0m
 
-test:
-	$(GOTEST) -v ./...
+.PHONY: precommit mockgen install clean
 
-run: build
-	./$(BINARY_NAME)
+help: ## Prints help (only for targets with comments)
+	@grep -E '^[a-zA-Z._/\-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk -F'[:##]' '{printf "$(CYAN_COLOR_START)%-20s $(CYAN_COLOR_END)%s\n", $$2, $$5}'
 
-deps:
+deps: ## Install/Upgrade dependencies
 	$(GOGET) ./...
 	$(GOMOD) tidy
 
-test-registry:
-	$(GOTEST) -v ./pkg/registry
-
-test-storage:
-	$(GOTEST) -v ./pkg/storage
-
-lint:
-# Exit with 0 to allow CI to continue with linter errors
-	golangci-lint run --issues-exit-code 0
-
-fmt:
+fmt: ## Format go code
 	gofmt -s -w .
 
-vet:
+fmt-check: ## Check whether gofmt has been applied
+	@if [ ! -z "$$(gofmt -l .)" ]; then \
+		echo "Your code is not formatted. Run 'make fmt' to format the code"; \
+		exit 1; \
+	fi
+
+vet: ## Run SCA using go vet
 	go vet $(shell go list ./...)
 
-# CI build target
-ci: deps fmt vet lint test build
-	@echo "CI build completed successfully"
+lint: ## Run lint
+	docker run --rm -v $(PWD):/app -v $(PWD)/.golangci-lint-cache:/root/.cache -w /app golangci/golangci-lint:v1.63.4 golangci-lint run -v --exclude S1000
 
-mockgen: install-mockgen
-	go generate ./...
+test: ## Run all tests
+	$(GOTEST) -v ./...
 
-install-mockgen:
+test/%: ## Run package level tests
+	$(GOTEST) -v ./pkg/$(@F)
+
+mockgen: install-mockgen ## Generate mocks using mockgen
+	PROJECT_HOME=$(PWD) go generate ./...
+
+install-mockgen: ## Install mockgen
 	@if ! [ -x "$$(command -v mockgen)" ]; then \
 		echo "mockgen not found, installing..."; \
 		$(GOCMD) install go.uber.org/mock/mockgen@latest; \
 	fi
 
-# Output directory
-OUT_DIR=./out
+$(OUT_DIR): ## Ensure output directory exists
+	@if [ ! -d $(OUT_DIR) ]; then mkdir -p $(OUT_DIR); fi
 
-# Binary names
-APISERVER_BINARY=$(OUT_DIR)/apiserver
-CONTROLLER_BINARY=$(OUT_DIR)/controller
-KUBELET_BINARY=$(OUT_DIR)/kubelet
+$(OUT_DIR)/%: ## Build to out directory
+	@$(GOBUILD) -o $(@) -v ./cmd/$(@F)/$(@F).go
+	@printf "Built %s\n" $(@F)
 
-# Main paths
-APISERVER_MAIN=./apiserver/main.go
-CONTROLLER_MAIN=./controller/main.go
-KUBELET_MAIN=./kubelet/main.go
+build/apiserver: $(OUT_DIR)/apiserver ## Build apiserver
+build/controller: $(OUT_DIR)/controller ## Build controller
+build/kubelet: $(OUT_DIR)/kubelet ## Build kubelet
 
-# Ensure the output directory exists
-$(OUT_DIR):
-	mkdir -p $(OUT_DIR)
+build: build/apiserver build/controller build/kubelet ## Build all
 
-# Build targets
-$(OUT_DIR)/%: $(OUT_DIR)
-	$(GOBUILD) -o $(@) -v ./cmd/$(@F)/main.go
+precommit: deps fmt vet lint test build ## Run precommit target(deps,fmt,vet,lint,test)
+	@echo "CI build completed successfully"
 
-build/apiserver: $(APISERVER_BINARY)
-build/controller: $(CONTROLLER_BINARY)
-build/kubelet: $(KUBELET_BINARY)
+$(GO_BIN_TARGETS):
+	@printf "Installing %s...\n" $(@F)
+	@$(GOINSTALL) ./cmd/$(@F)/$(@F).go
+	@printf "Successfully installed %s\n" $(@F)
+	@printf "Executable located at %s\n\n" $(GOPATH)/bin/$(@F)
 
-# Combined build target
-build-all: $(APISERVER_BINARY) $(CONTROLLER_BINARY) $(KUBELET_BINARY)
+install/apiserver: $(GOPATH)/bin/apiserver ## Install apiserver in $(GOPATH)/bin
+install/controller: $(GOPATH)/bin/controller ## Install controller in $(GOPATH)/bin
+install/kubelet: $(GOPATH)/bin/kubelet ## Install kubelet in $(GOPATH)/bin
 
-clean:
-	$(GOCLEAN)
-	rm -f $(APISERVER_BINARY) $(CONTROLLER_BINARY) $(KUBELET_BINARY)
-	rm -rf $(OUT_DIR)
+install: install/apiserver install/controller install/kubelet ## Install all
+run: ### Run the project
+	process-compose -f process-compose.yml up
+
+clean: ## Cleans all directories
+	@$(GOCLEAN)
+	@rm -f $(BINARY_PATHS)
+	@rm -rf $(OUT_DIR)
+	@printf "Cleaned up build artifacts\n"
+	@rm -f $(EXECUTABLES)
+	@printf "Cleaned up installed binaries\n"
+	@rm -rf $(DIST_DIR)
+	@printf "Cleaned up dist artifacts\n"
+	@rm -rf $(HOME)/gokube
+	@printf "Cleaned up gokube binaries\n"
+
+include limactl.mk
+include colima.mk
