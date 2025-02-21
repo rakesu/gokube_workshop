@@ -48,19 +48,13 @@ func (r *NodeRegistry) CreateNode(ctx context.Context, node *api.Node) error {
 	// Check if node already exists
 	key := generateKey(nodePrefix, node.Name)
 	existingNode := &api.Node{}
-	err := r.storage.Get(ctx, key, existingNode)
-	if err == nil {
-		// No error means the node was found
+	if err := r.storage.Get(ctx, key, existingNode); err == nil {
 		return ErrNodeAlreadyExists
 	}
-	if !errors.Is(err, storage.ErrNotFound) {
-		// Some other error occurred
-		return fmt.Errorf("failed to check existing node: %w", err)
-	}
 
-	// Node doesn't exist, create it
+
 	if err := r.storage.Create(ctx, key, node); err != nil {
-		return fmt.Errorf("failed to create node: %w", err)
+		return ErrInternal
 	}
 
 	return nil
@@ -77,7 +71,7 @@ func (r *NodeRegistry) GetNode(ctx context.Context, name string) (*api.Node, err
 	err := r.storage.Get(ctx, key, node)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return nil, fmt.Errorf("node %s not found", name)
+			return nil, ErrNodeNotFound
 		}
 		return nil, ErrInternal
 	}
