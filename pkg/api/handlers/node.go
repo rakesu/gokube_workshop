@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
@@ -23,106 +22,51 @@ func NewNodeHandler(nodeRegistry *registry.NodeRegistry) *NodeHandler {
 
 // CreateNode handles POST requests to create a new Node
 func (h *NodeHandler) CreateNode(request *restful.Request, response *restful.Response) {
-	node := new(api.Node)
+	node := &api.Node{}
 	if err := request.ReadEntity(node); err != nil {
 		api.WriteError(response, http.StatusBadRequest, err)
 		return
 	}
 
-	err := h.nodeRegistry.CreateNode(context.Background(), node)
-	if err != nil {
-		switch {
-		case errors.Is(err, registry.ErrNodeInvalid):
-			api.WriteError(response, http.StatusBadRequest, err)
-		case errors.Is(err, registry.ErrNodeAlreadyExists):
-			api.WriteError(response, http.StatusConflict, err)
-		default:
-			api.WriteError(response, http.StatusInternalServerError, err)
-		}
-		return
-	}
-
-	api.WriteResponse(response, http.StatusCreated, node)
+	err := h.nodeRegistry.CreateNode(request.Request.Context(), node)
+	h.handleNodeResponse(response, http.StatusCreated, node, err)
 }
 
 // GetNode handles GET requests to retrieve a Node
 func (h *NodeHandler) GetNode(request *restful.Request, response *restful.Response) {
 	name := request.PathParameter("name")
-
 	node, err := h.nodeRegistry.GetNode(request.Request.Context(), name)
-	if err != nil {
-		switch {
-		case errors.Is(err, registry.ErrNodeNotFound):
-			api.WriteError(response, http.StatusNotFound, err)
-		case errors.Is(err, registry.ErrNodeInvalid):
-			api.WriteError(response, http.StatusBadRequest, err)
-		default:
-			api.WriteError(response, http.StatusInternalServerError, err)
-		}
-		return
-	}
-
-	api.WriteResponse(response, http.StatusOK, node)
+	h.handleNodeResponse(response, http.StatusOK, node, err)
 }
 
 // UpdateNode handles PUT requests to update a Node
 func (h *NodeHandler) UpdateNode(request *restful.Request, response *restful.Response) {
 	name := request.PathParameter("name")
-	node := new(api.Node)
+	node := &api.Node{}
 	if err := request.ReadEntity(node); err != nil {
 		api.WriteError(response, http.StatusBadRequest, err)
 		return
 	}
 
-	// Verify that the name in the URL matches the name in the body
 	if name != node.Name {
-		api.WriteError(response, http.StatusBadRequest, errors.New("node name in URL must match name in body"))
+		api.WriteError(response, http.StatusBadRequest, registry.ErrNodeInvalid)
 		return
 	}
 
 	err := h.nodeRegistry.UpdateNode(request.Request.Context(), node)
+	h.handleNodeResponse(response, http.StatusOK, node, err)
+}
+
+// handleNodeResponse processes the response for node operations, handling both success and error cases
+func (h *NodeHandler) handleNodeResponse(response *restful.Response, successStatus int, result interface{}, err error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, registry.ErrNodeNotFound):
 			api.WriteError(response, http.StatusNotFound, err)
 		case errors.Is(err, registry.ErrNodeInvalid):
 			api.WriteError(response, http.StatusBadRequest, err)
-		case errors.Is(err, registry.ErrInternal):
-			api.WriteError(response, http.StatusInternalServerError, err)
-		default:
-			api.WriteError(response, http.StatusInternalServerError, err)
-		}
-		return
-	}
-
-	api.WriteResponse(response, http.StatusOK, node)
-}
-
-// DeleteNode handles DELETE requests to remove a Node
-func (h *NodeHandler) DeleteNode(request *restful.Request, response *restful.Response) {
-	name := request.PathParameter("name")
-
-	err := h.nodeRegistry.DeleteNode(request.Request.Context(), name)
-	if err != nil {
-		switch {
-		case errors.Is(err, registry.ErrNodeInvalid):
-			api.WriteError(response, http.StatusBadRequest, err)
-		case errors.Is(err, registry.ErrInternal):
-			api.WriteError(response, http.StatusInternalServerError, err)
-		default:
-			api.WriteError(response, http.StatusInternalServerError, err)
-		}
-		return
-	}
-
-	api.WriteResponse(response, http.StatusNoContent, nil)
-}
-
-// ListNodes handles GET requests to list all Nodes
-func (h *NodeHandler) ListNodes(request *restful.Request, response *restful.Response) {
-	nodes, err := h.nodeRegistry.ListNodes(request.Request.Context())
-	if err != nil {
-		switch {
+		case errors.Is(err, registry.ErrNodeAlreadyExists):
+			api.WriteError(response, http.StatusConflict, err)
 		case errors.Is(err, registry.ErrListNodesFailed):
 			api.WriteError(response, http.StatusInternalServerError, err)
 		case errors.Is(err, registry.ErrInternal):
@@ -133,7 +77,20 @@ func (h *NodeHandler) ListNodes(request *restful.Request, response *restful.Resp
 		return
 	}
 
-	api.WriteResponse(response, http.StatusOK, nodes)
+	api.WriteResponse(response, successStatus, result)
+}
+
+// DeleteNode handles DELETE requests to remove a Node
+func (h *NodeHandler) DeleteNode(request *restful.Request, response *restful.Response) {
+	name := request.PathParameter("name")
+	err := h.nodeRegistry.DeleteNode(request.Request.Context(), name)
+	h.handleNodeResponse(response, http.StatusNoContent, name, err)
+}
+
+// ListNodes handles GET requests to list all Nodes
+func (h *NodeHandler) ListNodes(request *restful.Request, response *restful.Response) {
+	nodes, err := h.nodeRegistry.ListNodes(request.Request.Context())
+	h.handleNodeResponse(response, http.StatusOK, nodes, err)
 }
 
 // RegisterNodeRoutes registers Node routes with the WebService
